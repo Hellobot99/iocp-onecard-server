@@ -1,0 +1,8 @@
+<Solution>
+  <Configurations>
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="IOCP_Portfolio.vcxproj" Id="0e8c4fea-6216-4c93-81b8-fc3b370461e8" />
+</Solution>

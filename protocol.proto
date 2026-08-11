@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+message C_Enter {
+    string nickname = 1;
+}
+
+message S_Enter {
+    string nickname = 1;
+}
+
+message C_Chat {
+    string message = 1;
+}
+
+message S_Chat {
+    string nickname = 1;
+    string message = 2;
+}
+
+message C_Leave {
+}
+
+message S_Leave {
+    string nickname = 1;
+}

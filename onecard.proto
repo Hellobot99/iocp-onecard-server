@@ -1,0 +1,107 @@
+syntax = "proto3";
+
+package onecard;
+
+// ── 카드 (표준 트럼프 카드 52장 + 조커 2장 = 54장) ──────────────────────
+
+enum Suit {
+    SUIT_NONE = 0; // 조커가 아직 무늬를 선언하지 않은 상태
+    SPADE = 1;
+    HEART = 2;
+    DIAMOND = 3;
+    CLUB = 4;
+}
+
+enum Rank {
+    RANK_UNSPECIFIED = 0;
+    ACE = 1;
+    TWO = 2;
+    THREE = 3;
+    FOUR = 4;
+    FIVE = 5;
+    SIX = 6;
+    SEVEN = 7;
+    EIGHT = 8;
+    NINE = 9;
+    TEN = 10;
+    JACK = 11;
+    QUEEN = 12;
+    KING = 13;
+    JOKER = 14; // suit는 SUIT_NONE
+}
+
+message Card {
+    Suit suit = 1;
+    Rank rank = 2;
+}
+
+// ── 매칭 ─────────────────────────────────────────────────────────────
+
+message C_JoinQueue {}
+message C_LeaveQueue {}
+
+message S_QueueStatus {
+    int32 waiting_count = 1;
+}
+
+message PlayerInfo {
+    int32 seat = 1;
+    string nickname = 2;
+}
+
+message S_GameStart {
+    repeated PlayerInfo players = 1;
+    int32 your_seat = 2;
+}
+
+// ── 게임 진행 ─────────────────────────────────────────────────────────
+//
+// 규칙 (하우스룰 고정):
+//  - 낼 수 있는 카드: 바닥 패와 무늬 또는 숫자가 같은 카드. 조커는 항상 가능.
+//  - 2  : 다음 사람이 2장 강제로 먹고 턴이 넘어간다. 다음 사람도 2를 내면
+//         누적되어 그다음 사람에게 넘어간다 (스택).
+//  - A  : 다음 사람 턴을 스킵한다.
+//  - J  : 무늬 지정 카드. 내면서 원하는 무늬를 선언한다.
+//  - 조커: 완전 와일드(항상 낼 수 있음). 내면서 무늬 선언 + 다음 사람이
+//         3장 강제로 먹는다.
+//  - 그 외(3,4,5,6,7,8,9,10,Q,K): 특수 효과 없음.
+//  - 한 턴에 카드 한 장만 낼 수 있다 (동일 숫자 여러 장 동시 내기는 지원 X).
+//  - 손패를 가장 먼저 비우면 승리.
+
+message C_PlayCard {
+    Card card = 1;
+    Suit declared_suit = 2; // J 또는 조커를 낼 때만 사용
+}
+
+message C_DrawCard {}
+
+message S_HandUpdate {
+    repeated Card hand = 1;
+}
+
+message S_GameState {
+    repeated int32 hand_counts = 1; // seat 순서, 각자 남은 카드 수
+    Card top_card = 2;
+    Suit current_suit = 3;          // J/조커로 무늬가 지정됐으면 그 무늬, 아니면 top_card 무늬
+    int32 current_turn_seat = 4;
+    int32 pending_draw = 5;         // 2 스택으로 다음 사람이 먹어야 할 장수 (0이면 없음)
+}
+
+message S_CardPlayed {
+    int32 seat = 1;
+    Card card = 2;
+}
+
+message S_CardDrawn {
+    int32 seat = 1;
+    int32 count = 2;
+}
+
+message S_InvalidMove {
+    string reason = 1;
+}
+
+message S_GameOver {
+    int32 winner_seat = 1;
+    string winner_nickname = 2;
+}
