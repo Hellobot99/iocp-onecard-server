@@ -48,3 +48,7 @@ crashlytics-build.properties
 
 # ── vcpkg / 기타 ─────────────────────────────────────────────────────────
 vcpkg_installed/
+
+# ── 런타임에 생성되는 SQLite DB (계정/상점/인벤토리) ───────────────────────
+*.db
+*.db-journal

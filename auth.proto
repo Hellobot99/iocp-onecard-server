@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package auth;
+
+// 비밀번호는 이 메시지에서만 평문으로 오간다 (전송 구간 자체가 암호화 안 된
+// raw TCP라 실제 서비스라면 TLS가 필요하다 - 포트폴리오 범위 밖이라 생략,
+// 대신 서버에 저장할 때는 반드시 salt+해시로만 저장한다).
+
+message C_SignUp {
+    string username = 1;
+    string password = 2;
+}
+
+message S_SignUpResult {
+    bool success = 1;
+    string message = 2;
+}
+
+message C_Login {
+    string username = 1;
+    string password = 2;
+}
+
+message S_LoginResult {
+    bool success = 1;
+    string message = 2;
+    int32 gold = 3; // 로그인 성공 시 현재 골드도 같이 내려준다 (상점 기능에서 사용 예정).
+}

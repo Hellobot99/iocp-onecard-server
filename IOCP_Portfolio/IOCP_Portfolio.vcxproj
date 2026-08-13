@@ -196,6 +196,7 @@
   <ItemGroup>
     <ClCompile Include="..\protocol.pb.cc" />
     <ClCompile Include="..\onecard.pb.cc" />
+    <ClCompile Include="..\auth.pb.cc" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="PacketHandler.cpp" />
     <ClCompile Include="Server.cpp" />
@@ -203,10 +204,15 @@
     <ClCompile Include="SessionManager.cpp" />
     <ClCompile Include="OneCardRoom.cpp" />
     <ClCompile Include="OneCardQueueManager.cpp" />
+    <ClCompile Include="JobQueue.cpp" />
+    <ClCompile Include="PasswordHash.cpp" />
+    <ClCompile Include="GameDB.cpp" />
+    <ClCompile Include="HttpServer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\protocol.pb.h" />
     <ClInclude Include="..\onecard.pb.h" />
+    <ClInclude Include="..\auth.pb.h" />
     <ClInclude Include="CustomOverlapped.h" />
     <ClInclude Include="ObjectPool.h" />
     <ClInclude Include="PacketHandler.h" />
@@ -216,6 +222,10 @@
     <ClInclude Include="SessionManager.h" />
     <ClInclude Include="OneCardRoom.h" />
     <ClInclude Include="OneCardQueueManager.h" />
+    <ClInclude Include="JobQueue.h" />
+    <ClInclude Include="PasswordHash.h" />
+    <ClInclude Include="GameDB.h" />
+    <ClInclude Include="HttpServer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

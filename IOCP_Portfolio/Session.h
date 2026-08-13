@@ -5,6 +5,7 @@
 #include <queue>
 #include <mutex>
 #include <memory>
+#include <atomic>
 #include "CustomOverlapped.h"
 #include "PacketHeader.h"
 
@@ -17,14 +18,28 @@ public:
     ~Session();
 
     void setId(int id) { id_ = id; }
-    void setNickname(std::string nickname) { nickname_ = nickname; }
     void setRecvOverlapped(CustomOVERLAPPED *recvOverlapped) { recvOverlapped_ = recvOverlapped; }
     void setSendOverlapped(CustomOVERLAPPED *sendOverlapped) { sendOverlapped_ = sendOverlapped; }
 
     int getid() { return id_; }
-    std::string getNickname() { return nickname_; }
     CustomOVERLAPPED *getRecvOverlapped() { return recvOverlapped_; }
     CustomOVERLAPPED *getSendOverlapped() { return sendOverlapped_; }
+
+    // 닉네임은 처음엔 접속 순번(예: "3")으로 채워지고, 로그인에 성공하면 계정
+    // 아이디로 바뀐다. 로그인 처리는 JobQueue 워커 스레드에서, 그 외 읽기는 IO
+    // 스레드에서 일어날 수 있어서 락으로 보호한다.
+    void setNickname(const std::string &nickname);
+    std::string getNickname();
+
+    // 세션 풀에서 이 객체가 재사용될 때마다 증가하는 값. JobQueue처럼 비동기로
+    // 나중에 실행되는 작업이 응답을 보내기 직전에, 자신이 캡처해둔 generation과
+    // 지금 값을 비교해서 "그 사이에 연결이 끊기고 다른 연결이 이 Session
+    // 객체를 재사용하지 않았는지" 확인하는 데 쓴다.
+    uint64_t GetGeneration() const { return generation_.load(); }
+
+    bool IsAuthenticated();
+    // 로그인 성공 시 호출한다. username을 닉네임에도 반영한다.
+    void SetAuthenticated(const std::string &username);
 
     // 지금 참여 중인 원카드 방 (없으면 nullptr). shared_ptr이라 방이 끝나서
     // 모든 세션이 참조를 놓으면 OneCardRoom이 자동으로 해제된다.
@@ -52,7 +67,12 @@ private:
     int id_;
     bool sending_ = false;
 
+    std::mutex identityMutex_;
     std::string nickname_;
+    bool authenticated_ = false;
+
+    std::atomic<uint64_t> generation_{0};
+
     CustomOVERLAPPED *sendOverlapped_;
     CustomOVERLAPPED *recvOverlapped_;
     std::queue<std::vector<char>> sendQueue_;

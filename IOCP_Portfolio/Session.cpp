@@ -18,6 +18,31 @@ Session::Session() {}
 
 Session::~Session() {}
 
+void Session::setNickname(const std::string &nickname)
+{
+    std::lock_guard<std::mutex> lock(identityMutex_);
+    nickname_ = nickname;
+}
+
+std::string Session::getNickname()
+{
+    std::lock_guard<std::mutex> lock(identityMutex_);
+    return nickname_;
+}
+
+bool Session::IsAuthenticated()
+{
+    std::lock_guard<std::mutex> lock(identityMutex_);
+    return authenticated_;
+}
+
+void Session::SetAuthenticated(const std::string &username)
+{
+    std::lock_guard<std::mutex> lock(identityMutex_);
+    authenticated_ = true;
+    nickname_ = username;
+}
+
 void Session::Send(PacketId id, const char *data, DWORD len)
 {
     const size_t packetSize = sizeof(PacketHeader) + static_cast<size_t>(len);
@@ -140,19 +165,30 @@ void Session::DispatchPackets()
 
 void Session::Reset()
 {
-    std::lock_guard<std::mutex> lock(sendMutex_);
+    {
+        std::lock_guard<std::mutex> lock(sendMutex_);
+        sending_ = false;
+        sendOffset_ = 0;
+        while (!sendQueue_.empty())
+            sendQueue_.pop();
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(identityMutex_);
+        nickname_ = "";
+        authenticated_ = false;
+    }
 
     isReleased_ = false;
-    sending_ = false;
-    sendOffset_ = 0;
-    while (!sendQueue_.empty())
-        sendQueue_.pop();
     recvBuffer_.clear();
     id_ = 0;
-    nickname_ = "";
 
     // 세션 풀에서 재사용되기 전에 반드시 비워야 한다. 안 그러면 새로
     // 붙은 연결이 이전 연결이 하던 원카드 게임의 좌석을 그대로 물려받는다.
     oneCardRoom_.reset();
     oneCardSeat_ = -1;
+
+    // JobQueue처럼 나중에(비동기로) 도착하는 작업이 "그 사이에 이 Session
+    // 객체가 다른 연결로 재사용됐는지"를 구분할 수 있게 세대를 올린다.
+    ++generation_;
 }

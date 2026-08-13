@@ -31,4 +31,10 @@ enum class PacketId : uint16_t
     S_OneCardCardDrawn = 16,
     S_OneCardInvalidMove = 17,
     S_OneCardGameOver = 18,
+
+    // 계정 (회원가입/로그인)
+    C_SignUp = 19,
+    S_SignUpResult = 20,
+    C_Login = 21,
+    S_LoginResult = 22,
 };
