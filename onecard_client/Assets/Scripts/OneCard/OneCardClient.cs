@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using Google.Protobuf;
 using Onecard;
+using Auth;
 using UnityEngine;
 
 namespace OneCardGame
@@ -31,6 +32,11 @@ namespace OneCardGame
         S_OneCardCardDrawn = 16,
         S_OneCardInvalidMove = 17,
         S_OneCardGameOver = 18,
+
+        C_SignUp = 19,
+        S_SignUpResult = 20,
+        C_Login = 21,
+        S_LoginResult = 22,
     }
 
     // 원카드 서버 접속 + 패킷 송수신을 담당하는 클라이언트.
@@ -48,8 +54,15 @@ namespace OneCardGame
         public OneCardGameState State { get; } = new OneCardGameState();
         public bool IsConnected => _net != null && _net.IsConnected;
 
+        // 로그인 상태와 골드는 로그인 성공(S_LoginResult) 시점에 갱신된다.
+        public bool IsAuthenticated { get; private set; }
+        public string Username { get; private set; }
+        public int Gold { get; private set; }
+
         public event Action OnConnected;
         public event Action<Exception> OnDisconnected;
+        public event Action<S_SignUpResult> OnSignUpResult;
+        public event Action<S_LoginResult> OnLoginResult;
         public event Action<S_QueueStatus> OnQueueStatus;
         public event Action<S_GameStart> OnGameStart;
         public event Action<S_HandUpdate> OnHandUpdate;
@@ -125,6 +138,9 @@ namespace OneCardGame
             while (_pendingDisconnects.TryDequeue(out Exception ex))
             {
                 Debug.Log($"[OneCardClient] 서버 연결 끊김: {ex?.Message ?? "정상 종료"}");
+                IsAuthenticated = false;
+                Username = null;
+                Gold = 0;
                 OnDisconnected?.Invoke(ex);
             }
 
@@ -136,6 +152,25 @@ namespace OneCardGame
         {
             switch ((PacketId)id)
             {
+                case PacketId.S_SignUpResult:
+                {
+                    var msg = S_SignUpResult.Parser.ParseFrom(payload);
+                    Debug.Log($"[OneCardClient] 회원가입 결과: {msg.Success} - {msg.Message}");
+                    OnSignUpResult?.Invoke(msg);
+                    break;
+                }
+                case PacketId.S_LoginResult:
+                {
+                    var msg = S_LoginResult.Parser.ParseFrom(payload);
+                    Debug.Log($"[OneCardClient] 로그인 결과: {msg.Success} - {msg.Message}");
+                    if (msg.Success)
+                    {
+                        IsAuthenticated = true;
+                        Gold = msg.Gold;
+                    }
+                    OnLoginResult?.Invoke(msg);
+                    break;
+                }
                 case PacketId.S_OneCardQueueStatus:
                 {
                     var msg = S_QueueStatus.Parser.ParseFrom(payload);
@@ -203,6 +238,15 @@ namespace OneCardGame
         }
 
         // ── 서버로 보내는 요청 ───────────────────────────────────────────
+
+        public void SignUp(string username, string password) =>
+            Send(PacketId.C_SignUp, new C_SignUp { Username = username, Password = password });
+
+        public void Login(string username, string password)
+        {
+            Username = username;
+            Send(PacketId.C_Login, new C_Login { Username = username, Password = password });
+        }
 
         public void JoinQueue() => Send(PacketId.C_OneCardJoinQueue, new C_JoinQueue());
 

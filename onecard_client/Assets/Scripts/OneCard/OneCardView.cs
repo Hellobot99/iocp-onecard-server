@@ -15,6 +15,13 @@ namespace OneCardGame
         private Font _font;
 
         private Text _statusText;
+
+        private GameObject _loginPanel;
+        private InputField _usernameInput;
+        private InputField _passwordInput;
+        private Text _authStatusText;
+
+        private GameObject _gameRoot;
         private Transform _opponentsRow;
         private Image _topCardImage;
         private Text _topCardLabel;
@@ -33,6 +40,12 @@ namespace OneCardGame
             OneCardClient client = OneCardClient.Instance;
             client.OnConnected += RefreshAll;
             client.OnDisconnected += _ => RefreshAll();
+            client.OnSignUpResult += msg => _authStatusText.text = msg.Message;
+            client.OnLoginResult += msg =>
+            {
+                _authStatusText.text = msg.Message;
+                RefreshAll();
+            };
             client.OnGameStart += _ => RefreshAll();
             client.OnHandUpdate += _ => RefreshAll();
             client.OnGameState += _ => RefreshAll();
@@ -56,18 +69,27 @@ namespace OneCardGame
             if (!client.IsConnected)
             {
                 _statusText.text = "서버에 연결되어 있지 않습니다.";
-                SetTopCard(null);
-                _suitPendingText.text = "";
-                SetLobbyButtonsVisible(false);
-                _drawButton.gameObject.SetActive(false);
+                _loginPanel.SetActive(false);
+                _gameRoot.SetActive(false);
                 return;
             }
+
+            if (!client.IsAuthenticated)
+            {
+                _statusText.text = "로그인이 필요합니다.";
+                _loginPanel.SetActive(true);
+                _gameRoot.SetActive(false);
+                return;
+            }
+
+            _loginPanel.SetActive(false);
+            _gameRoot.SetActive(true);
 
             OneCardGameState state = client.State;
 
             if (!state.IsGameActive)
             {
-                _statusText.text = "대기 중 - 대기열에 참가하면 인원이 모이는 대로 매칭됩니다.";
+                _statusText.text = $"{client.Username} 님 환영합니다 (골드 {client.Gold}) - 대기열에 참가하면 인원이 모이는 대로 매칭됩니다.";
                 SetTopCard(null);
                 _suitPendingText.text = "";
                 SetLobbyButtonsVisible(true);
@@ -182,10 +204,21 @@ namespace OneCardGame
 
             _statusText = CreateText(root.transform, "연결 중...", 22, TextAnchor.UpperLeft);
 
-            CreateText(root.transform, "다른 플레이어", 14, TextAnchor.UpperLeft);
-            _opponentsRow = CreateRow(root.transform, "Opponents");
+            BuildLoginPanel(root.transform);
 
-            var topCardRow = CreateRow(root.transform, "TopCardRow");
+            _gameRoot = new GameObject("GameRoot", typeof(RectTransform));
+            _gameRoot.transform.SetParent(root.transform, false);
+            var gameLayout = _gameRoot.AddComponent<VerticalLayoutGroup>();
+            gameLayout.spacing = 12;
+            gameLayout.childForceExpandWidth = true;
+            gameLayout.childForceExpandHeight = false;
+            gameLayout.childAlignment = TextAnchor.UpperLeft;
+            _gameRoot.AddComponent<LayoutElement>();
+
+            CreateText(_gameRoot.transform, "다른 플레이어", 14, TextAnchor.UpperLeft);
+            _opponentsRow = CreateRow(_gameRoot.transform, "Opponents");
+
+            var topCardRow = CreateRow(_gameRoot.transform, "TopCardRow");
             var topCardGo = new GameObject("TopCardImage", typeof(RectTransform));
             topCardGo.transform.SetParent(topCardRow, false);
             _topCardImage = topCardGo.AddComponent<Image>();
@@ -195,16 +228,85 @@ namespace OneCardGame
             topLe.preferredHeight = 115;
             _topCardLabel = CreateText(topCardRow, "", 16, TextAnchor.MiddleLeft);
 
-            _suitPendingText = CreateText(root.transform, "", 16, TextAnchor.UpperLeft);
+            _suitPendingText = CreateText(_gameRoot.transform, "", 16, TextAnchor.UpperLeft);
             _suitPendingText.GetComponent<LayoutElement>().preferredHeight = 48; // 두 줄까지 표시
 
-            CreateText(root.transform, "내 손패 (본인 턴일 때만 클릭 가능)", 14, TextAnchor.UpperLeft);
-            _handRow = CreateRow(root.transform, "Hand");
+            CreateText(_gameRoot.transform, "내 손패 (본인 턴일 때만 클릭 가능)", 14, TextAnchor.UpperLeft);
+            _handRow = CreateRow(_gameRoot.transform, "Hand");
 
-            var buttonRow = CreateRow(root.transform, "Buttons");
+            var buttonRow = CreateRow(_gameRoot.transform, "Buttons");
             _joinButton = CreateButton(buttonRow, "대기열 참가", () => OneCardClient.Instance.JoinQueue());
             _leaveButton = CreateButton(buttonRow, "대기열 나가기", () => OneCardClient.Instance.LeaveQueue());
             _drawButton = CreateButton(buttonRow, "드로우", () => OneCardClient.Instance.DrawCard());
+        }
+
+        // 로그인/회원가입 패널. 연결은 됐지만 아직 인증 전일 때만 보인다.
+        private void BuildLoginPanel(Transform parent)
+        {
+            _loginPanel = new GameObject("LoginPanel", typeof(RectTransform));
+            _loginPanel.transform.SetParent(parent, false);
+            var layout = _loginPanel.AddComponent<VerticalLayoutGroup>();
+            layout.spacing = 8;
+            layout.childAlignment = TextAnchor.UpperLeft;
+            layout.childForceExpandWidth = false;
+            _loginPanel.AddComponent<LayoutElement>();
+
+            CreateText(_loginPanel.transform, "로그인 / 회원가입", 18, TextAnchor.UpperLeft);
+            _usernameInput = CreateInputField(_loginPanel.transform, "아이디 (3~20자)", false);
+            _passwordInput = CreateInputField(_loginPanel.transform, "비밀번호 (4자 이상)", true);
+            _authStatusText = CreateText(_loginPanel.transform, "", 14, TextAnchor.UpperLeft);
+
+            var buttonRow = CreateRow(_loginPanel.transform, "AuthButtons");
+            CreateButton(buttonRow, "로그인", () => OneCardClient.Instance.Login(_usernameInput.text, _passwordInput.text));
+            CreateButton(buttonRow, "회원가입", () => OneCardClient.Instance.SignUp(_usernameInput.text, _passwordInput.text));
+        }
+
+        private InputField CreateInputField(Transform parent, string placeholder, bool isPassword)
+        {
+            var go = new GameObject(placeholder + "Input", typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var image = go.AddComponent<Image>();
+            image.color = Color.white;
+
+            var inputField = go.AddComponent<InputField>();
+            inputField.targetGraphic = image;
+            if (isPassword)
+                inputField.contentType = InputField.ContentType.Password;
+
+            var textGo = new GameObject("Text", typeof(RectTransform));
+            textGo.transform.SetParent(go.transform, false);
+            var text = textGo.AddComponent<Text>();
+            text.font = _font;
+            text.fontSize = 16;
+            text.color = Color.black;
+            text.supportRichText = false;
+            SetStretch(textGo.GetComponent<RectTransform>(), 8, 4);
+            inputField.textComponent = text;
+
+            var placeholderGo = new GameObject("Placeholder", typeof(RectTransform));
+            placeholderGo.transform.SetParent(go.transform, false);
+            var placeholderText = placeholderGo.AddComponent<Text>();
+            placeholderText.font = _font;
+            placeholderText.fontSize = 16;
+            placeholderText.color = new Color(0f, 0f, 0f, 0.5f);
+            placeholderText.text = placeholder;
+            placeholderText.fontStyle = FontStyle.Italic;
+            SetStretch(placeholderGo.GetComponent<RectTransform>(), 8, 4);
+            inputField.placeholder = placeholderText;
+
+            var le = go.AddComponent<LayoutElement>();
+            le.preferredWidth = 240;
+            le.preferredHeight = 36;
+
+            return inputField;
+        }
+
+        private static void SetStretch(RectTransform rect, float horizontalPadding, float verticalPadding)
+        {
+            rect.anchorMin = Vector2.zero;
+            rect.anchorMax = Vector2.one;
+            rect.offsetMin = new Vector2(horizontalPadding, verticalPadding);
+            rect.offsetMax = new Vector2(-horizontalPadding, -verticalPadding);
         }
 
         private static void EnsureEventSystem()
@@ -216,7 +318,12 @@ namespace OneCardGame
             // 패키지를 쓰도록 설정돼 있어서 InputSystemUIInputModule이 필요하다.
             var go = new GameObject("EventSystem");
             go.AddComponent<EventSystem>();
-            go.AddComponent<InputSystemUIInputModule>();
+            var uiModule = go.AddComponent<InputSystemUIInputModule>();
+
+            // AddComponent만으로 만들면 OnEnable에서 기본 액션이 자동 할당되긴 하지만,
+            // 런타임에 코드로 생성하는 경우를 위해 문서에서 권장하는 대로 명시적으로도
+            // 호출해준다 (직접 만들 때 클릭이 하나도 안 먹었던 적이 있어서 방어적으로 유지).
+            uiModule.AssignDefaultActions();
         }
 
         private Transform CreateRow(Transform parent, string name)
