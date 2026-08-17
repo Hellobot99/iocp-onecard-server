@@ -4,6 +4,9 @@
 #include <thread>
 #include <vector>
 #include <cstdlib>
+#include <mutex>
+#include <algorithm>
+#include <numeric>
 
 std::atomic<bool> g_running(true);
 std::atomic<long long> g_totalSent(0);
@@ -11,6 +14,11 @@ std::atomic<long long> g_totalReceived(0);
 std::atomic<long long> g_totalConnected(0);
 std::atomic<long long> g_totalInvalidMoves(0);
 std::atomic<long long> g_totalGamesFinished(0);
+
+// 봇별 RTT(핑) 표본. 표본 수가 많지 않아서(봇당 최대 20개) 그냥 mutex로
+// 보호하는 벡터에 다 모았다가 끝나고 한 번에 정렬해서 통계를 낸다.
+std::mutex g_latencyMutex;
+std::vector<double> g_latenciesMs;
 
 // 사용법: Client.exe [봇 수] [지속 시간(초)] [서버 IP] [포트]
 // 기본값: 봇 50개, 60초, 127.0.0.1, 9000.
@@ -89,6 +97,30 @@ int main(int argc, char *argv[])
     std::cout << "총 수신: " << g_totalReceived << std::endl;
     std::cout << "서버가 거부한 행동: " << g_totalInvalidMoves << std::endl;
     std::cout << "완료된 게임 수: " << g_totalGamesFinished << std::endl;
+
+    {
+        std::lock_guard<std::mutex> lock(g_latencyMutex);
+        if (!g_latenciesMs.empty())
+        {
+            std::sort(g_latenciesMs.begin(), g_latenciesMs.end());
+            const size_t n = g_latenciesMs.size();
+            const double sum = std::accumulate(g_latenciesMs.begin(), g_latenciesMs.end(), 0.0);
+
+            auto percentile = [&](double p)
+            {
+                size_t idx = static_cast<size_t>(p * (n - 1));
+                return g_latenciesMs[idx];
+            };
+
+            std::cout << "\n=== 핑(RTT) 통계 (표본 " << n << "개) ===" << std::endl;
+            std::cout << "평균: " << (sum / n) << "ms" << std::endl;
+            std::cout << "최소: " << g_latenciesMs.front() << "ms" << std::endl;
+            std::cout << "최대: " << g_latenciesMs.back() << "ms" << std::endl;
+            std::cout << "p50: " << percentile(0.50) << "ms" << std::endl;
+            std::cout << "p95: " << percentile(0.95) << "ms" << std::endl;
+            std::cout << "p99: " << percentile(0.99) << "ms" << std::endl;
+        }
+    }
 
     WSACleanup();
 }

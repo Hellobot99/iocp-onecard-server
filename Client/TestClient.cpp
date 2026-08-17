@@ -1,6 +1,7 @@
 #include "TestClient.h"
 #include "PacketHeader.h"
 #include <cstring>
+#include <mutex>
 
 extern std::atomic<bool> g_running;
 extern std::atomic<long long> g_totalSent;
@@ -9,9 +10,13 @@ extern std::atomic<long long> g_totalConnected;
 extern std::atomic<long long> g_totalInvalidMoves;
 extern std::atomic<long long> g_totalGamesFinished;
 
+extern std::mutex g_latencyMutex;
+extern std::vector<double> g_latenciesMs;
+
 namespace
 {
     constexpr size_t kBufferCapacity = 1024; // 서버 Buffer::data와 동일한 크기.
+    constexpr int kMaxPingSamples = 20;       // 봇 1개당 RTT 표본 상한 - 핑 트래픽이 부하 자체를 왜곡하지 않도록.
 }
 
 void TestClient::Start(const std::string &ip, int port, int botId)
@@ -39,6 +44,11 @@ void TestClient::Start(const std::string &ip, int port, int botId)
         sock_ = INVALID_SOCKET;
         return;
     }
+
+    // 서버와 동일하게 Nagle을 끈다 - 특히 RTT 측정용 핑처럼 작은 패킷이 지연
+    // ACK와 겹쳐서 부풀려지는 걸 막아야 서버 쪽 실제 처리 지연을 정확히 잰다.
+    BOOL noDelay = TRUE;
+    setsockopt(sock_, IPPROTO_TCP, TCP_NODELAY, (const char *)&noDelay, sizeof(noDelay));
 
     running_ = true;
     g_totalConnected++;
@@ -124,11 +134,30 @@ void TestClient::DispatchPacket(uint16_t id, const char *payload, uint16_t bodyS
         if (msg.success())
         {
             SendJoinQueue();
+            SendPing();
         }
         else
         {
             std::cerr << "[TestClient] " << username_ << " 로그인 실패: " << msg.message() << std::endl;
         }
+        break;
+    }
+
+    case PacketId::S_Pong:
+    {
+        auto elapsed = std::chrono::steady_clock::now() - pingSentTime_;
+        double ms = std::chrono::duration<double, std::milli>(elapsed).count();
+
+        {
+            std::lock_guard<std::mutex> lock(g_latencyMutex);
+            g_latenciesMs.push_back(ms);
+        }
+
+        // 이전 핑의 응답을 받은 뒤에만 다음 핑을 보낸다 - 한 번에 하나만
+        // 날려서 어느 Pong이 어느 Ping에 대한 응답인지 순서만으로 구분할 수
+        // 있게 한다 (별도 시퀀스 번호 없이도 안전).
+        if (pingSamplesSent_ < kMaxPingSamples)
+            SendPing();
         break;
     }
 
@@ -273,6 +302,20 @@ void TestClient::SendDrawCard()
 {
     onecard::C_DrawCard msg;
     SendPacket(static_cast<uint16_t>(PacketId::C_OneCardDrawCard), msg);
+}
+
+void TestClient::SendPing()
+{
+    pingSentTime_ = std::chrono::steady_clock::now();
+    pingSamplesSent_++;
+
+    // Ping/Pong은 payload가 없어서(RTT만 재면 됨) protobuf 없이 헤더만 보낸다.
+    PacketHeader header;
+    header.id = static_cast<uint16_t>(PacketId::C_Ping);
+    header.size = static_cast<uint16_t>(sizeof(PacketHeader));
+
+    send(sock_, reinterpret_cast<const char *>(&header), static_cast<int>(sizeof(header)), 0);
+    g_totalSent++;
 }
 
 void TestClient::SendPacket(uint16_t id, const google::protobuf::Message &msg)

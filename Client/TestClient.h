@@ -10,6 +10,7 @@
 #include <string>
 #include <iostream>
 #include <atomic>
+#include <chrono>
 #include <google/protobuf/message.h>
 #include "onecard.pb.h"
 #include "auth.pb.h"
@@ -39,6 +40,12 @@ private:
     void SendPlayCard(const onecard::Card &card, onecard::Suit declaredSuit);
     void SendDrawCard();
     void SendPacket(uint16_t id, const google::protobuf::Message &msg);
+
+    // RTT(왕복시간) 측정용 핑. 로그인 성공 시 한 번 시작해서, Pong을 받을
+    // 때마다 왕복시간을 기록하고 다음 핑을 이어서 보낸다 (봇당 표본 수 제한 있음).
+    void SendPing();
+    std::chrono::steady_clock::time_point pingSentTime_;
+    int pingSamplesSent_ = 0;
 
     // 내 턴이면 낼 수 있는 카드를 찾아서 내고, 없으면 드로우한다. 서버
     // (OneCardRoom::IsCardPlayable)와 같은 규칙을 따르는 클라이언트 쪽 판단이다.
