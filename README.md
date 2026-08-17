@@ -80,7 +80,9 @@ msbuild Client.vcxproj /p:Configuration=Release /p:Platform=x64
 x64\Release\Client.exe [봇 수] [지속시간(초)] [서버IP] [포트]
 ```
 접속 → 매칭 대기열 참가 → 서버와 동일한 규칙으로 카드 자동 플레이/드로우 → 게임 종료 시
-재참가, 를 반복하는 봇을 N개 띄워서 부하를 준다.
+재참가, 를 반복하는 봇을 N개 띄워서 부하를 준다. 로그인 성공 시 봇마다 별도로 RTT
+측정용 `C_Ping`/`S_Pong`(게임 로직과 무관, payload 없이 즉시 echo)을 봇당 최대 20개
+표본까지 주고받아서, 종료 시 평균/최소/최대/p50/p95/p99를 같이 출력한다.
 
 ## 개발하며 발견하고 고친 문제들
 
@@ -137,6 +139,26 @@ called" 크래시로 재현됨. → `Stop()`에 mutex를 걸어서, 한쪽이 �
 `InputSystemUIInputModule`을 코드로 `AddComponent`만 하면 마우스 클릭/포인터 액션이
 비어있어서 UI 버튼이 하나도 반응하지 않았다 (키보드 입력은 `Keyboard.current`로 직접
 읽어서 문제없이 동작해서 더 헷갈렸음). → `AssignDefaultActions()`를 명시적으로 호출.
+
+### 10. GameOver 브로드캐스트 순서 때문에 재입장이 영구히 막히던 레이스
+부하테스트 봇을 **localhost**(RTT 0.03ms 수준)로 돌렸더니, 몇 라운드 지나면 매칭이
+완전히 멈춰버리는 문제가 있었다 (같은 서버를 실제 AWS 네트워크로 때린 부하테스트에서는
+1000봇까지도 전혀 재현되지 않던 문제 — 원인이 바로 이 지점).
+
+`OneCardRoom::EndGame()`이 `GameOver`를 먼저 브로드캐스트하고 *그 다음에* 각 세션의
+방 참조(`Session::oneCardRoom_`)를 지우는 순서로 되어 있었다. RTT가 거의 0인 환경에서는
+클라이언트가 `GameOver`를 받자마자 곧바로 재입장(`C_OneCardJoinQueue`)을 보낼 수 있는데,
+서버가 그 세션의 방 참조를 미처 다 지우기도 전에 도착하면 `HandleOneCardJoinQueue`가
+"이미 방에 있음"으로 잘못 거부한다. 이 거부는 클라에게 응답 패킷을 보내주지 않기 때문에
+거부당한 봇은 그 사실을 알 방법이 없어 재시도도 안 하고, 대기열은 영원히 그 인원만큼
+모자란 채로 4명을 못 채워 전체 매칭이 멈춘다. 실제 네트워크(AWS, RTT 20~50ms대)에서는
+이 타이밍 창이 거의 열리지 않아 한 번도 재현되지 않았던 것.
+
+추가로 `Session::oneCardRoom_`이 매칭 스레드(`StartRoom`)와 여러 IO 스레드
+(`EndGame`/`HandleDisconnect`)에서 락 없이 읽고 쓰이던 데이터 레이스이기도 했다.
+
+→ (1) `EndGame`/`HandleDisconnect`에서 방 참조를 **먼저 지우고 나서** 브로드캐스트하도록
+순서 변경, (2) `Session::oneCardRoom_`/`oneCardSeat_`에 `nickname_`처럼 전용 뮤텍스 추가.
 
 ## 프로젝트 구조
 ```
