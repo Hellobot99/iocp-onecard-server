@@ -16,6 +16,9 @@ namespace OneCardGame
 
         private Text _statusText;
 
+        private GameObject _connectPanel;
+        private InputField _serverHostInput;
+
         private GameObject _loginPanel;
         private InputField _usernameInput;
         private InputField _passwordInput;
@@ -29,7 +32,15 @@ namespace OneCardGame
         private Transform _handRow;
         private Button _joinButton;
         private Button _leaveButton;
+        private Button _shopButton;
         private Button _drawButton;
+
+        // 상점(HTTP) - 게임 로직과 무관해서 게임 상태와는 별도의 플래그로 열림/닫힘을 관리한다.
+        private bool _shopOpen;
+        private GameObject _shopPanel;
+        private Text _shopStatusText;
+        private Transform _shopItemsColumn;
+        private Transform _inventoryColumn;
 
         private void Start()
         {
@@ -68,21 +79,35 @@ namespace OneCardGame
 
             if (!client.IsConnected)
             {
-                _statusText.text = "서버에 연결되어 있지 않습니다.";
+                _statusText.text = "서버에 연결되어 있지 않습니다. 아래에서 서버 IP를 입력하고 접속하세요.";
+                _connectPanel.SetActive(true);
                 _loginPanel.SetActive(false);
                 _gameRoot.SetActive(false);
+                _shopPanel.SetActive(false);
                 return;
             }
+
+            _connectPanel.SetActive(false);
 
             if (!client.IsAuthenticated)
             {
                 _statusText.text = "로그인이 필요합니다.";
                 _loginPanel.SetActive(true);
                 _gameRoot.SetActive(false);
+                _shopPanel.SetActive(false);
                 return;
             }
 
             _loginPanel.SetActive(false);
+
+            if (_shopOpen)
+            {
+                _gameRoot.SetActive(false);
+                _shopPanel.SetActive(true);
+                return; // 상점 화면 내용은 RefreshShopData()가 비동기로 채운다.
+            }
+
+            _shopPanel.SetActive(false);
             _gameRoot.SetActive(true);
 
             OneCardGameState state = client.State;
@@ -116,6 +141,7 @@ namespace OneCardGame
         {
             _joinButton.gameObject.SetActive(show);
             _leaveButton.gameObject.SetActive(show);
+            _shopButton.gameObject.SetActive(show);
         }
 
         private void SetTopCard(Card card)
@@ -204,6 +230,7 @@ namespace OneCardGame
 
             _statusText = CreateText(root.transform, "연결 중...", 22, TextAnchor.UpperLeft);
 
+            BuildConnectPanel(root.transform);
             BuildLoginPanel(root.transform);
 
             _gameRoot = new GameObject("GameRoot", typeof(RectTransform));
@@ -237,7 +264,31 @@ namespace OneCardGame
             var buttonRow = CreateRow(_gameRoot.transform, "Buttons");
             _joinButton = CreateButton(buttonRow, "대기열 참가", () => OneCardClient.Instance.JoinQueue());
             _leaveButton = CreateButton(buttonRow, "대기열 나가기", () => OneCardClient.Instance.LeaveQueue());
+            _shopButton = CreateButton(buttonRow, "상점", OpenShop);
             _drawButton = CreateButton(buttonRow, "드로우", () => OneCardClient.Instance.DrawCard());
+
+            BuildShopPanel(root.transform);
+        }
+
+        // 서버 IP 입력 패널. 씬에 배치하지 않고 코드로 자동 생성되는 구조라
+        // Inspector로 서버 주소를 바꿀 방법이 없어서, 연결 전 화면에서 직접
+        // 입력받는다 (로컬 개발 중엔 기본값 127.0.0.1로 자동 접속 시도하고,
+        // 실패하면 이 패널이 뜬다).
+        private void BuildConnectPanel(Transform parent)
+        {
+            _connectPanel = new GameObject("ConnectPanel", typeof(RectTransform));
+            _connectPanel.transform.SetParent(parent, false);
+            var layout = _connectPanel.AddComponent<VerticalLayoutGroup>();
+            layout.spacing = 8;
+            layout.childAlignment = TextAnchor.UpperLeft;
+            layout.childForceExpandWidth = false;
+            _connectPanel.AddComponent<LayoutElement>();
+
+            CreateText(_connectPanel.transform, "서버 접속", 18, TextAnchor.UpperLeft);
+            _serverHostInput = CreateInputField(_connectPanel.transform, "서버 IP (기본 127.0.0.1)", false);
+            _serverHostInput.text = OneCardClient.Instance.serverHost;
+
+            CreateButton(_connectPanel.transform, "접속", () => OneCardClient.Instance.ConnectTo(_serverHostInput.text));
         }
 
         // 로그인/회원가입 패널. 연결은 됐지만 아직 인증 전일 때만 보인다.
@@ -259,6 +310,117 @@ namespace OneCardGame
             var buttonRow = CreateRow(_loginPanel.transform, "AuthButtons");
             CreateButton(buttonRow, "로그인", () => OneCardClient.Instance.Login(_usernameInput.text, _passwordInput.text));
             CreateButton(buttonRow, "회원가입", () => OneCardClient.Instance.SignUp(_usernameInput.text, _passwordInput.text));
+        }
+
+        // ── 상점 (HTTP, TCP 게임 프로토콜과 무관) ───────────────────────────
+
+        private void BuildShopPanel(Transform parent)
+        {
+            _shopPanel = new GameObject("ShopPanel", typeof(RectTransform));
+            _shopPanel.transform.SetParent(parent, false);
+            var layout = _shopPanel.AddComponent<VerticalLayoutGroup>();
+            layout.spacing = 8;
+            layout.childAlignment = TextAnchor.UpperLeft;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+            _shopPanel.AddComponent<LayoutElement>();
+
+            CreateText(_shopPanel.transform, "상점", 18, TextAnchor.UpperLeft);
+            _shopStatusText = CreateText(_shopPanel.transform, "", 15, TextAnchor.UpperLeft);
+
+            CreateText(_shopPanel.transform, "판매 아이템", 14, TextAnchor.UpperLeft);
+            _shopItemsColumn = CreateColumn(_shopPanel.transform, "ShopItems");
+
+            CreateText(_shopPanel.transform, "보유 아이템", 14, TextAnchor.UpperLeft);
+            _inventoryColumn = CreateColumn(_shopPanel.transform, "Inventory");
+
+            var buttonRow = CreateRow(_shopPanel.transform, "ShopButtons");
+            CreateButton(buttonRow, "새로고침", RefreshShopData);
+            CreateButton(buttonRow, "닫기", CloseShop);
+
+            _shopPanel.SetActive(false);
+        }
+
+        private void OpenShop()
+        {
+            _shopOpen = true;
+            RefreshAll();
+            RefreshShopData();
+        }
+
+        private void CloseShop()
+        {
+            _shopOpen = false;
+            RefreshAll();
+        }
+
+        // 상점 목록/인벤토리를 서버에서 다시 받아와 화면을 갱신한다. 둘 다
+        // 비동기(HTTP)라 요청을 걸어두고 콜백에서 그려 넣는 방식이다.
+        private void RefreshShopData()
+        {
+            int gold = OneCardClient.Instance.Gold;
+            _shopStatusText.text = $"보유 골드: {gold}   불러오는 중...";
+            ClearChildren(_shopItemsColumn);
+            ClearChildren(_inventoryColumn);
+
+            ShopClient.Instance.FetchItems(
+                items =>
+                {
+                    _shopStatusText.text = $"보유 골드: {OneCardClient.Instance.Gold}";
+                    BuildShopItems(items);
+                },
+                err => _shopStatusText.text = $"상점 목록을 불러오지 못했습니다: {err}");
+
+            ShopClient.Instance.FetchInventory(
+                OneCardClient.Instance.Username,
+                BuildInventory,
+                err => Debug.LogWarning($"[OneCardView] 인벤토리 조회 실패: {err}"));
+        }
+
+        private void BuildShopItems(List<ShopItemData> items)
+        {
+            ClearChildren(_shopItemsColumn);
+            foreach (ShopItemData item in items)
+            {
+                var row = CreateRow(_shopItemsColumn, $"ShopItem_{item.id}");
+                Text label = CreateText(row, $"{item.name}  ({item.price}G)", 15, TextAnchor.MiddleLeft);
+                label.GetComponent<LayoutElement>().minWidth = 240;
+                int itemId = item.id; // 클로저 캡처용 로컬 변수
+                CreateButton(row, "구매", () => PurchaseItem(itemId));
+            }
+        }
+
+        private void BuildInventory(List<InventoryItemData> items)
+        {
+            ClearChildren(_inventoryColumn);
+            if (items.Count == 0)
+            {
+                CreateText(_inventoryColumn, "(보유한 아이템이 없습니다)", 14, TextAnchor.UpperLeft);
+                return;
+            }
+
+            foreach (InventoryItemData item in items)
+                CreateText(_inventoryColumn, "- " + item.name, 14, TextAnchor.UpperLeft);
+        }
+
+        private void PurchaseItem(int itemId)
+        {
+            _shopStatusText.text = "구매 처리 중...";
+            ShopClient.Instance.Purchase(
+                OneCardClient.Instance.Username,
+                itemId,
+                result =>
+                {
+                    _shopStatusText.text = $"{result.message}   (보유 골드: {result.gold})";
+                    if (result.success)
+                    {
+                        // 골드는 로그인(TCP) 때만 서버가 보내주므로, 구매(HTTP) 이후에는
+                        // 이 응답값으로 클라이언트 쪽 표시를 직접 맞춰줘야 한다.
+                        OneCardClient.Instance.SetGold(result.gold);
+                        ShopClient.Instance.FetchInventory(OneCardClient.Instance.Username, BuildInventory);
+                    }
+                },
+                err => _shopStatusText.text = $"구매 요청 실패: {err}");
         }
 
         private InputField CreateInputField(Transform parent, string placeholder, bool isPassword)
@@ -335,6 +497,19 @@ namespace OneCardGame
             layout.childForceExpandWidth = false;
             layout.childForceExpandHeight = false;
             layout.childAlignment = TextAnchor.MiddleLeft;
+            go.AddComponent<LayoutElement>();
+            return go.transform;
+        }
+
+        private Transform CreateColumn(Transform parent, string name)
+        {
+            var go = new GameObject(name, typeof(RectTransform));
+            go.transform.SetParent(parent, false);
+            var layout = go.AddComponent<VerticalLayoutGroup>();
+            layout.spacing = 4;
+            layout.childForceExpandWidth = true;
+            layout.childForceExpandHeight = false;
+            layout.childAlignment = TextAnchor.UpperLeft;
             go.AddComponent<LayoutElement>();
             return go.transform;
         }

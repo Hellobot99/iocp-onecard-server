@@ -51,6 +51,10 @@ namespace OneCardGame
         public int serverPort = 9000;
         public bool autoConnectOnStart = true;
 
+        // 상점/인벤토리 REST API 포트. 게임 포트(TCP, serverPort)와 별개로 뜬다
+        // (서버 쪽 HttpServer.cpp 참고).
+        public int shopPort = 8080;
+
         public OneCardGameState State { get; } = new OneCardGameState();
         public bool IsConnected => _net != null && _net.IsConnected;
 
@@ -83,6 +87,7 @@ namespace OneCardGame
             var go = new GameObject("OneCardClient");
             DontDestroyOnLoad(go);
             go.AddComponent<OneCardClient>();
+            go.AddComponent<ShopClient>();
             go.AddComponent<OneCardDebugController>();
             go.AddComponent<OneCardView>();
         }
@@ -105,6 +110,9 @@ namespace OneCardGame
 
         public void Connect()
         {
+            // 재접속(다른 서버로 다시 접속 등) 시 이전 연결이 남아있으면 정리한다.
+            _net?.Dispose();
+
             _net = new NetworkClient();
             _net.OnDisconnected += OnNetDisconnected;
 
@@ -118,6 +126,18 @@ namespace OneCardGame
             {
                 Debug.LogError($"[OneCardClient] 접속 실패: {e.Message}");
             }
+        }
+
+        // 씬에 배치하지 않고 런타임에 자동 생성되는 구조라 Inspector로 서버 주소를
+        // 바꿀 방법이 없다. 대신 접속 화면(OneCardView)에서 IP를 입력받아 이걸
+        // 호출한다 - 게임 포트/상점 포트는 프로토콜상 고정이라 host만 받는다.
+        public void ConnectTo(string host)
+        {
+            serverHost = string.IsNullOrWhiteSpace(host) ? "127.0.0.1" : host.Trim();
+            IsAuthenticated = false;
+            Username = null;
+            Gold = 0;
+            Connect();
         }
 
         // NetworkClient의 수신 스레드에서 호출된다. OnDisconnected 구독자(예:
@@ -247,6 +267,11 @@ namespace OneCardGame
             Username = username;
             Send(PacketId.C_Login, new C_Login { Username = username, Password = password });
         }
+
+        // 골드는 로그인(TCP) 시점에만 서버가 알려준다. 상점 구매(HTTP)는 별도
+        // 통신이라 서버가 알아서 밀어주지 않으므로, 구매 응답을 받은 뒤 여기로
+        // 반영해줘야 화면에 보이는 골드가 실제 값과 어긋나지 않는다.
+        public void SetGold(int gold) => Gold = gold;
 
         public void JoinQueue() => Send(PacketId.C_OneCardJoinQueue, new C_JoinQueue());
 
