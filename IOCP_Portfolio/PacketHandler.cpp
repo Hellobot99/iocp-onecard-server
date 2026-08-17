@@ -39,6 +39,9 @@ void PacketHandler::HandlePacket(Session *session, uint16_t id, const char *payl
     case static_cast<uint16_t>(PacketId::C_Login):
         HandleLogin(session, payload, bodySize);
         break;
+    case static_cast<uint16_t>(PacketId::C_Ping):
+        HandlePing(session, payload, bodySize);
+        break;
     default:
         return;
     }
@@ -169,4 +172,13 @@ void PacketHandler::HandleLogin(Session *session, const char *payload, uint16_t 
         std::string body;
         msg.SerializeToString(&body);
         session->Send(PacketId::S_LoginResult, body.data(), static_cast<DWORD>(body.size())); });
+}
+
+void PacketHandler::HandlePing(Session *session, const char *payload, uint16_t bodySize)
+{
+    // 부하테스트 클라이언트가 RTT(왕복시간)를 재려고 보내는 핑이다. DB 조회가
+    // 필요 없는 요청이라 JobQueue를 거치지 않고 이 자리(IO 스레드)에서 바로
+    // 되돌려준다 - JobQueue를 거치면 큐잉 대기시간이 섞여서 순수 네트워크+IOCP
+    // 왕복시간이 아니게 된다.
+    session->Send(PacketId::S_Pong, nullptr, 0);
 }

@@ -92,6 +92,14 @@ void Server::Start(int port)
             continue;
         }
 
+        // Nagle 알고리즘을 끈다. 기본값(켜짐)이면 작은 패킷(카드 한 장 정보 등)을
+        // 바로 안 보내고 ACK를 기다리며 모아뒀다가 보내서, 부하테스트로 재본 RTT의
+        // p99가 p50보다 몇 배씩 튀는 원인이 됐다 (지연 ACK와 겹치면서 수십 ms까지
+        // 지연). 이 서버는 게임 패킷 대부분이 작고 빈번해서 처리량보다 지연시간이
+        // 중요하다 - 꺼서 즉시 전송되게 한다.
+        BOOL noDelay = TRUE;
+        setsockopt(client, IPPROTO_TCP, TCP_NODELAY, (const char *)&noDelay, sizeof(noDelay));
+
         CreateIoCompletionPort((HANDLE)client, iocpHandle_, 0, 0);
 
         Session *session = sessionPool_.Acquire();

@@ -21,4 +21,6 @@ private:
 
     static void HandleSignUp(Session *session, const char *payload, uint16_t bodySize);
     static void HandleLogin(Session *session, const char *payload, uint16_t bodySize);
+
+    static void HandlePing(Session *session, const char *payload, uint16_t bodySize);
 };

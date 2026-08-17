@@ -43,13 +43,11 @@ public:
 
     // 지금 참여 중인 원카드 방 (없으면 nullptr). shared_ptr이라 방이 끝나서
     // 모든 세션이 참조를 놓으면 OneCardRoom이 자동으로 해제된다.
-    void SetOneCardRoom(std::shared_ptr<OneCardRoom> room, int seat)
-    {
-        oneCardRoom_ = std::move(room);
-        oneCardSeat_ = seat;
-    }
-    std::shared_ptr<OneCardRoom> GetOneCardRoom() { return oneCardRoom_; }
-    int getOneCardSeat() { return oneCardSeat_; }
+    // 매칭 스레드(StartRoom)와 여러 IO 스레드(EndGame/HandleDisconnect)가
+    // 서로 다른 세션을 통해 동시에 건드릴 수 있어서 roomMutex_로 보호한다.
+    void SetOneCardRoom(std::shared_ptr<OneCardRoom> room, int seat);
+    std::shared_ptr<OneCardRoom> GetOneCardRoom();
+    int getOneCardSeat();
 
     void Send(PacketId id, const char *data, DWORD len);
     void DoSend();
@@ -87,6 +85,7 @@ private:
     // (coalesced) 올 수 있어서, 완전한 패킷이 만들어질 때까지 여기에 누적한다.
     std::vector<char> recvBuffer_;
 
+    std::mutex roomMutex_;
     std::shared_ptr<OneCardRoom> oneCardRoom_;
     int oneCardSeat_ = -1;
 };

@@ -247,6 +247,12 @@ void OneCardRoom::HandleDisconnect(Session *session)
     if (connectedCount < 2)
     {
         finished_ = true;
+
+        // EndGame과 동일한 이유로 순서 고정: 방 참조를 먼저 지우고 나서 방송한다.
+        for (auto &p : players_)
+            if (p.session)
+                p.session->SetOneCardRoom(nullptr, -1);
+
         if (lastConnectedSeat >= 0)
         {
             onecard::S_GameOver overMsg;
@@ -254,9 +260,6 @@ void OneCardRoom::HandleDisconnect(Session *session)
             overMsg.set_winner_nickname(players_[lastConnectedSeat].nickname);
             BroadcastPacket(PacketId::S_OneCardGameOver, overMsg);
         }
-        for (auto &p : players_)
-            if (p.session)
-                p.session->SetOneCardRoom(nullptr, -1);
         return;
     }
 
@@ -401,14 +404,21 @@ void OneCardRoom::EndGame(int winnerSeat)
 {
     finished_ = true;
 
+    // 방 참조를 먼저 지운 뒤에 브로드캐스트해야 한다. 순서가 바뀌면, 클라가
+    // GameOver를 받자마자 곧바로 재입장을 시도했을 때(RTT가 거의 0인
+    // 로컬 환경에서 실제로 재현됨) 그 세션이 아직 지워지지 않은 옛 방
+    // 참조를 들고 있어서 "이미 방에 있음"으로 재입장이 거부된다. 이 거부는
+    // 클라에게 응답 패킷으로 알려주지 않기 때문에, 거부당한 봇은 그 사실을
+    // 알 방법이 없어 영영 대기열에서 빠진 채로 남는다 (매칭이 4명을 다시
+    // 못 채워서 전체 매칭이 멈춰버림).
+    for (auto &p : players_)
+        if (p.session)
+            p.session->SetOneCardRoom(nullptr, -1);
+
     onecard::S_GameOver overMsg;
     overMsg.set_winner_seat(winnerSeat);
     overMsg.set_winner_nickname(players_[winnerSeat].nickname);
     BroadcastPacket(PacketId::S_OneCardGameOver, overMsg);
-
-    for (auto &p : players_)
-        if (p.session)
-            p.session->SetOneCardRoom(nullptr, -1);
 }
 
 void OneCardRoom::SendHand(const Player &player)

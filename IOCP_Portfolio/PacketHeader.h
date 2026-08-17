@@ -37,4 +37,8 @@ enum class PacketId : uint16_t
     S_SignUpResult = 20,
     C_Login = 21,
     S_LoginResult = 22,
+
+    // 부하테스트용 RTT 측정 (게임 로직과 무관, payload 없음)
+    C_Ping = 23,
+    S_Pong = 24,
 };

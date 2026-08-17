@@ -43,6 +43,25 @@ void Session::SetAuthenticated(const std::string &username)
     nickname_ = username;
 }
 
+void Session::SetOneCardRoom(std::shared_ptr<OneCardRoom> room, int seat)
+{
+    std::lock_guard<std::mutex> lock(roomMutex_);
+    oneCardRoom_ = std::move(room);
+    oneCardSeat_ = seat;
+}
+
+std::shared_ptr<OneCardRoom> Session::GetOneCardRoom()
+{
+    std::lock_guard<std::mutex> lock(roomMutex_);
+    return oneCardRoom_;
+}
+
+int Session::getOneCardSeat()
+{
+    std::lock_guard<std::mutex> lock(roomMutex_);
+    return oneCardSeat_;
+}
+
 void Session::Send(PacketId id, const char *data, DWORD len)
 {
     const size_t packetSize = sizeof(PacketHeader) + static_cast<size_t>(len);
@@ -58,7 +77,10 @@ void Session::Send(PacketId id, const char *data, DWORD len)
     header.size = static_cast<uint16_t>(packetSize);
 
     memcpy(packet.data(), &header, sizeof(PacketHeader));
-    memcpy(packet.data() + sizeof(PacketHeader), data, len);
+    // len이 0이면 data가 nullptr일 수 있다(예: Ping 응답) - nullptr을 memcpy에
+    // 넘기는 건 크기가 0이어도 표준상 UB라 명시적으로 걸러낸다.
+    if (len > 0)
+        memcpy(packet.data() + sizeof(PacketHeader), data, len);
 
     std::lock_guard<std::mutex> lock(sendMutex_);
 
@@ -183,10 +205,13 @@ void Session::Reset()
     recvBuffer_.clear();
     id_ = 0;
 
-    // 세션 풀에서 재사용되기 전에 반드시 비워야 한다. 안 그러면 새로
-    // 붙은 연결이 이전 연결이 하던 원카드 게임의 좌석을 그대로 물려받는다.
-    oneCardRoom_.reset();
-    oneCardSeat_ = -1;
+    {
+        // 세션 풀에서 재사용되기 전에 반드시 비워야 한다. 안 그러면 새로
+        // 붙은 연결이 이전 연결이 하던 원카드 게임의 좌석을 그대로 물려받는다.
+        std::lock_guard<std::mutex> lock(roomMutex_);
+        oneCardRoom_.reset();
+        oneCardSeat_ = -1;
+    }
 
     // JobQueue처럼 나중에(비동기로) 도착하는 작업이 "그 사이에 이 Session
     // 객체가 다른 연결로 재사용됐는지"를 구분할 수 있게 세대를 올린다.
