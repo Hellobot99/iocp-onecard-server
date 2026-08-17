@@ -34,6 +34,12 @@ namespace OneCardGame
         {
             _tcpClient = new TcpClient();
             _tcpClient.Connect(host, port);
+
+            // Nagle을 끈다. 기본값(켜짐)이면 카드 한 장 정보처럼 작은 패킷을 바로
+            // 안 보내고 모아뒀다가 보내서, 서버 부하테스트 봇으로 잰 RTT의 p99가
+            // p50보다 몇 배씩 튀는 원인이 됐다 (서버 쪽도 TCP_NODELAY로 맞춰서 끔).
+            _tcpClient.NoDelay = true;
+
             _stream = _tcpClient.GetStream();
 
             IsConnected = true;
