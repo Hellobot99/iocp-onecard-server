@@ -29,8 +29,20 @@ Server (IOCP 워커 스레드 N개 + 매칭 타이머 스레드 1개)
  ├─ PacketHandler     : 패킷 id로 라우팅
  ├─ ObjectPool<T>     : Session/Buffer 재사용 풀
  ├─ OneCardQueueManager : 매칭 대기열 (4명 모이면 즉시, 아니면 15초 후 인원대로 시작)
- └─ OneCardRoom       : 방 하나의 게임 상태(덱/턴/카드효과), 자체 mutex로 보호
+ ├─ OneCardRoom       : 방 하나의 게임 상태(덱/턴/카드효과), 자체 mutex로 보호
+ ├─ JobQueue          : DB I/O를 IOCP 스레드에서 떼어내는 워커 스레드 1개짜리 작업 큐
+ ├─ GameDB            : SQLite 래퍼 (계정/골드/상점/인벤토리)
+ └─ HttpServer        : 상점/인벤토리 REST API (cpp-httplib, 8080번 - 게임 포트와 별개)
 ```
+
+### 실시간(TCP) vs 트랜잭션(HTTP) 분리
+회원가입/로그인과 게임 진행(매칭, 카드 플레이)은 지연시간에 민감하고 상태가 계속
+바뀌는 실시간 통신이라 IOCP 기반 TCP(9000번)로 처리한다. 반대로 상점/인벤토리는
+"눌렀을 때 한 번 처리되면 끝"인 요청-응답형 트랜잭션이라, 굳이 커스텀 패킷 프로토콜을
+쓸 필요 없이 표준 REST(HTTP, 8080번)로 분리했다. 회원가입/로그인/게임 액션은 DB
+조회가 필요한 경우 `JobQueue`에 위임해서 IOCP 스레드가 블로킹되지 않게 하고,
+HTTP 핸들러도 `std::promise`/`future`로 같은 `JobQueue`에 작업을 넣고 동기적으로
+기다리는 방식으로 DB 접근을 한 곳(JobQueue 워커 스레드 1개)으로 직렬화한다.
 
 ### 패킷 프로토콜
 - `protocol.proto` : 레거시 채팅(Enter/Leave/Chat) — 초기 IOCP 학습용으로 남겨둠
@@ -69,9 +81,12 @@ msbuild IOCP_Portfolio.vcxproj /p:Configuration=Release /p:Platform=x64
 자동으로 복사해준다). 기본 포트 9000. Ctrl+C로 정상 종료(소켓 정리 + 스레드 join)된다.
 
 ### 클라이언트 (Unity)
-`onecard_client` 폴더를 Unity Hub에서 열고 Play. 서버 접속 정보는
-`OneCardClient` 컴포넌트의 인스펙터에서 바꿀 수 있다 (기본 127.0.0.1:9000).
-씬에 아무것도 배치할 필요 없이 `RuntimeInitializeOnLoadMethod`로 자동 부트스트랩된다.
+`onecard_client` 폴더를 Unity Hub에서 열고 Play. 씬에 아무것도 배치할 필요 없이
+`RuntimeInitializeOnLoadMethod`로 자동 부트스트랩된다. 기본값(127.0.0.1:9000, 상점
+127.0.0.1:8080)으로 자동 접속을 시도하고, 실패하면 뜨는 화면에서 서버 IP를 직접
+입력해 원격 서버(AWS 등)에 접속할 수 있다 (게임 포트/상점 포트는 프로토콜상
+고정이라 IP만 입력하면 됨). 로그인 후 로비 화면의 "상점" 버튼으로 아이템 조회/구매/
+인벤토리 확인이 가능하다 (`ShopClient`가 `UnityWebRequest`로 8080번 HTTP API를 호출).
 
 ### 부하테스트 도구
 ```
@@ -171,7 +186,9 @@ onecard.proto           원카드 게임 프로토콜
 
 ## 부하테스트
 
-_추후 추가 예정._
+AWS EC2(t2.micro, 1 vCPU/1GB) 위에서 50~4000봇까지 단계적으로 돌린 결과, RTT
+전후 비교(TCP_NODELAY 적용으로 p99 59ms → 11ms대), CloudWatch 리소스 사용량까지
+전부 [LOADTEST.md](LOADTEST.md)에 정리했다.
 
 ## 알려진 제약사항 / 향후 개선 방향
 - 패킷 최대 크기가 세션 스크래치 버퍼(1024바이트)로 고정돼 있음 — 더 큰 페이로드가
@@ -180,3 +197,6 @@ _추후 추가 예정._
   텍스트("JOKER")로 대체 표시됨.
 - 연결이 끊긴 클라이언트의 소켓만 정리하고, `Stop()` 시 활성 연결들을 명시적으로 끊지는
   않음 (프로세스 종료 시 OS가 정리).
+- 상점에서 산 아이템(카드 뒷면 스킨 등)이 인벤토리에는 정상 반영되지만, 실제 게임
+  화면에 스킨을 적용하는 로직은 아직 없음 — 지금은 순수 트랜잭션(구매/보유 확인)까지만
+  구현됨.
