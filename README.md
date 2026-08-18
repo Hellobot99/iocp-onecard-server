@@ -81,6 +81,11 @@ msbuild IOCP_Portfolio.vcxproj /p:Configuration=Release /p:Platform=x64
 자동으로 복사해준다). 기본 포트 9000. Ctrl+C로 정상 종료(소켓 정리 + 스레드 join)된다.
 
 ### 클라이언트 (Unity)
+카드 스프라이트로 쓰는 "2D Cards Game Art Pack"은 유료 에셋(재배포 금지)이라
+레포에 포함하지 않는다 — Unity Asset Store에서 구매 후 `onecard_client/Assets/`에
+직접 넣어야 한다 (`.gitignore` 참고). 없어도 실행은 되고, 카드가 스프라이트 대신
+빈 박스로만 보인다.
+
 `onecard_client` 폴더를 Unity Hub에서 열고 Play. 씬에 아무것도 배치할 필요 없이
 `RuntimeInitializeOnLoadMethod`로 자동 부트스트랩된다. 기본값(127.0.0.1:9000, 상점
 127.0.0.1:8080)으로 자동 접속을 시도하고, 실패하면 뜨는 화면에서 서버 IP를 직접
